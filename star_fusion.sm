@@ -1,0 +1,67 @@
+# Snakefile to align RNA-seq files with STAR 2-pass with STAR-Fusion 
+# 2018.09.20 cjyoon.  
+import os
+import re
+import pandas as pd
+
+# PATH TO STAR FILES -> use conda environment created with 'conda create -n star star star-fusion'
+os.environ['PATH'] =  '/home/users/cjyoon/anaconda3/envs/star/bin:' + os.environ['PATH']
+
+# PATH TO EXTRA PERL5LIB MODULE NOT INSTALLED BY CONDA
+os.environ['PERL5LIB'] = '/home/users/cjyoon/local_perl/star/lib/site_perl'
+
+os.system('which STAR')
+os.system('which STAR-Fusion')
+print(os.environ['TRINITY_HOME']) # for fusion inspector
+os.system('perl -V')
+os.system('perl -e "use Carp::Assert;"')
+
+# PATH TO CTAT DIR
+CTAT_DIR = '/home/users/cjyoon/reference/GRCh37_v19_CTAT_lib_Feb092018/ctat_genome_lib_build_dir'
+
+
+# PATH to SAMBAMBA
+SAMBAMBA = '/home/users/cjyoon/anaconda3/bin/sambamba'
+
+
+
+# Identify FASTQ file samples in the fastq folder
+SAMPLES = list(set([ re.sub(r'_R[0-9]+.fastq.gz', '', i) for i in os.listdir('./rna_fastq') if i.endswith('fastq.gz')]))
+#SAMPLES = ['3897_pos']
+# Create output folder directories 
+os.makedirs('./temp_bam', exist_ok=True)
+os.makedirs('./star_fusion_bam', exist_ok=True)
+
+rule all:
+    input:
+        star_fusion_sorted_bam = expand("star_fusion_bam/{sample}.STARF.bam", sample=SAMPLES)
+
+rule star_fusion_align:
+    input:
+        fastq1 = lambda wildcards: 'rna_fastq/' + wildcards.sample + '_R1.fastq.gz',
+        fastq2 = lambda wildcards: 'rna_fastq/' + wildcards.sample + '_R2.fastq.gz',
+
+    output: 
+        star_fusion_bam = "temp_bam/{sample}/std.STAR.bam",
+        star_fusion_sorted_bam = "star_fusion_bam/{sample}.STARF.bam", 
+        fusion_output = "temp_bam/{sample}/star-fusion.fusion_predictions.abridged.tsv",
+        fusion_output_with_name = "fusion_predictions/{sample}.star-fusion.fusion_predictions.abridged.tsv"
+    threads: 4
+    log: 
+        "logs/{sample}.star_fusion_align.log"
+    params:
+        sample = '{sample}', 
+        CTAT_DIR = CTAT_DIR
+    shell:
+        "(STAR-Fusion --genome_lib_dir {params.CTAT_DIR} " 
+        "--CPU {threads} "
+        "--left_fq {input.fastq1} "
+        "--right_fq {input.fastq2} " 
+        "--examine_coding_effect "
+#        "--FusionInspector validate --denovo_reconstruct "
+        "--output_dir temp_bam/{params.sample}; "
+        "sambamba sort -t {threads} --tmpdir=temp_bam/{params.sample} "
+        "-o {output.star_fusion_sorted_bam} {output.star_fusion_bam}; "
+        "cp {output.fusion_output} {output.fusion_output_with_name} ) "
+        "&> {log}"
+
